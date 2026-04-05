@@ -21,7 +21,7 @@ class Agent:
     
 
     
-    def execute(self) -> str:
+    def execute(self) -> Dict:
         """Call the LLM
 
         Returns:
@@ -30,14 +30,16 @@ class Agent:
         messages = [{"role": "system", "content": self._build_system_prompt()}]
         messages.extend([m.to_openai_format() for m in self.messages])
         response  = self.client.chat.completions.create(
-            model="deepseek/deepseek-r1",   
+            model="deepseek/deepseek-chat",   
             messages=messages,
             temperature=0.7,
             max_tokens=4096,
         )
         answer : str = response.choices[0].message.content
-        return answer
+        tokens : int = response.usage.completion_tokens
         
+        return {"response": answer , "tokens": tokens}
+
     def add_tool(self, func: Callable, description: str | None= None, example: str | None = None):        
         # Extraction of the function name
         tool_name: str  = func.__name__
@@ -176,13 +178,14 @@ class Agent:
         self.messages.append(Message(type=MessageType.USER , content=user_query))
         for step in range(max_steps):
             print(f"== STEP : {step+1} ==\n")
-            response_text = self.execute()
+            resp = self.execute()
+            response_text = resp["response"]
             self.messages.append( Message( type= MessageType.AGENT , content= response_text))
             
             #Find the type of response
             parsed_resp= self._parse_response(response_text)
             if parsed_resp.get("thought"):
-                print(f"THOUGHT:\n{parsed_resp['thought']}\n")
+                print(f"THOUGHT ({resp["tokens"]} tokens):\n{parsed_resp['thought']}\n")
             
             if parsed_resp["type"] == "final":
                 print(f"FINAL ANSWER :\n{parsed_resp['content']}\n\nFINAL ANSWER RETURNED AFTER {step} STEPS\n")
@@ -191,11 +194,11 @@ class Agent:
             elif parsed_resp["type"] == "action": 
                 tool_name = parsed_resp["tool_name"]
                 tool_input = parsed_resp["tool_input"]
-                print(f"\nACTION:\nTOOL USED: {tool_name}\nTOOL INPUT:{tool_input}\n")
+                print(f"\nACTION :\nTOOL USED: {tool_name}\nTOOL INPUT:{tool_input}\n")
                 
                 #Let's execute the action 
                 observation = self.execute_tool(tool_name,tool_input)
-                print(f"OBSERVATION:\n{observation}\n")  
+                print(f"OBSERVATION({resp["tokens"]} tokens):\n{observation}\n")  
                 
                 self.messages.append(Message(type=MessageType.OBSERVATION , content = f"Observation : {observation}"))
                 
@@ -204,7 +207,7 @@ class Agent:
             
         print("LIMIT OF STEPS REACHED")
         return "LIMITS OF STEPS REACHED WITHOUHT FINDING THE ANSWER "
-                
+    
     def _build_system_prompt(self) -> str:
         """Build a strict system prompt for ReAct behavior."""
         
@@ -249,9 +252,9 @@ class Agent:
 
         self.messages.append(Message(type=MessageType.USER, content=message))
         result = self.execute()
-        self.messages.append(Message(type=MessageType.AGENT, content=result))
+        self.messages.append(Message(type=MessageType.AGENT, content=result["response"]))
 
-        return result      
+        return result["response"]      
     
     def get_tools(self):
         return self.tools
