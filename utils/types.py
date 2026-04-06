@@ -7,6 +7,7 @@ class MessageType(str, Enum):
     USER = "user"
     AGENT = "agent"
     OBSERVATION = "observation"
+    RESUME = "resume"
     
 class Message(BaseModel):
     type : MessageType

@@ -17,18 +17,31 @@ class Agent:
         self.client = client
         self.tools : Dict[str,Tool] = {}
         self.tool_descriptions : List[Dict] = []
+        
+        #Let's add some memory to our agent
         self.messages  : List[Message] = []
-    
-
-    
+        self.max_history = 12
+        
+        
     def execute(self) -> Dict:
         """Call the LLM
 
         Returns:
             str: the llm answer
         """
+        if len(self.messages) > self.max_history:
+            print("Historic too long , summary process started ....")
+            summary_text = self.summarize_history()
+            
+            if summary_text:
+                self.messages = [
+                    Message(type=MessageType.RESUME, content=f"RESUME: {summary_text}")
+                ] + self.messages[-6:]
+                
+                
         messages = [{"role": "system", "content": self._build_system_prompt()}]
         messages.extend([m.to_openai_format() for m in self.messages])
+        
         response  = self.client.chat.completions.create(
             model="deepseek/deepseek-chat",   
             messages=messages,
@@ -39,6 +52,47 @@ class Agent:
         tokens : int = response.usage.completion_tokens
         
         return {"response": answer , "tokens": tokens}
+    
+    def summarize_history(self):
+        """ Use an llm to resume the conversation""" 
+        
+        old_messages = self.messages[:-6]
+        if not old_messages:
+            return ""
+        
+        history_text = "\n".join([
+            f"{msg.type.value.upper()}: {msg.content}" 
+            for msg in old_messages
+        ])   
+        
+        #Prompt to say to the llm to resume the context
+        summary_prompt = f"""You are a highly skilled conversation summarizer.
+
+Create a clear and concise summary of the previous conversation. Include only the essential information:
+
+- User details and preferences
+- Main goals and objectives
+- Important facts and context
+- Any decisions or conclusions reached
+
+Conversation to summarize:
+{history_text}
+
+Return ONLY the summary. No introductions, no explanations, no extra text."""
+        try:
+            response = self.client.chat.completions.create(
+                model="deepseek/deepseek-chat",          
+                messages=[{"role": "user", "content": summary_prompt}],   
+                temperature=0.5,
+                max_tokens=350,
+            )
+            summary = response.choices[0].message.content.strip()
+            print("[SUMMARY GENERATED]")
+            return summary
+        
+        except Exception as e:
+            print(f"Error while summarizing the messages : {e}")
+            return "Previous conversation summary not available."
 
     def add_tool(self, func: Callable, description: str | None= None, example: str | None = None):        
         # Extraction of the function name
@@ -261,3 +315,4 @@ class Agent:
     
     def get_history(self):
         return self.messages
+    
