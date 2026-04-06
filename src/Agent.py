@@ -255,7 +255,6 @@ Return ONLY the summary. No introductions, no explanations, no extra text."""
                     "thought": thought
                 }
 
-            # Action normale
             return {
                 "type": "action",
                 "thought": thought,
@@ -456,3 +455,51 @@ Be natural, professional, and transparent. Keep it concise."""
     def get_history(self):
         return self.messages
     
+    def chat(self):
+        """ Terminal mode to chat with your agent"""        
+        
+
+        batman =""" 
+             *         *         *        *  
+          ***          **********          ***       
+       *****           **********           *****    
+     *******           **********           *******  
+   **********         ************         ********** .      ______    _______  ______    __   ___________   ______  
+  ****************************************************      |   _  \  |   ____||   _  \  |  | |           | /  __  \ 
+ ******************************************************     |  |_)  | |  |__   |  |_)  | |  | `---|  |----`|  |  |  |
+********************************************************    |   ___/  |   __|  |   ___/  |  |     |  |     |  |  |  |
+********************************************************    |  |      |  |____ |  |      |  |     |  |     |  `--'  |
+********************************************************    | _|      |_______|| _|      |__|     |__|      \______/ 
+ ******************************************************                                                      
+  ********      ************************      ********            ___       _______  _______ .__   __.  __________ 
+   *******       *     *********      *       *******            /   \     /  _____||   ____||  \ |  | |          |  
+     ******             *******              ******             /  ^  \   |  |  __  |  |__   |   \|  | `---|  |---`  
+       *****             *****              *****              /  /_\  \  |  | |_ | |   __|  |  . `  |     |  |       
+          ***             ***              ***                /  _____  \ |  |__| | |  |____ |  |\   |     |  |       
+            **             *              **                 /__/     \__\ \______| |_______||__| \__|     |__|
+
+"""     
+        print(batman)
+        print("=" * 65)
+        print("   SYSTEM INITIALIZED - AWAITING INPUT".center(65))
+        print("=" * 65 + "\n")
+
+        while True:
+            try:
+                user_input = input("USER~$ ").strip()
+
+                if user_input.lower() in ["exit", "quit", "q"]:
+                    print("\n[SYSTEM] Shutting down neural core...")
+                    print("[SYSTEM] Goodbye, operator.\n")
+                    break
+
+                if user_input:
+                    print("\n[PROCESSING QUERY...]\n")
+                    response = self.run(user_query=user_input, max_steps=12)
+                    print("\n" + "─" * 65 + "\n")
+
+            except KeyboardInterrupt:
+                print("\n\n[INTERRUPTED] Session terminated.")
+                break
+            except Exception as e:
+                print(f"\n[ERROR] {e}")

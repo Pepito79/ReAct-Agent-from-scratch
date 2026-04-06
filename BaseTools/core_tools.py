@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 import re
 
-# ====================== CORE TOOLS FOR REACT AGENT ======================
 
 def get_current_time() -> str:
     """
@@ -85,7 +84,7 @@ def read_file(filepath: str) -> str:
         return f"Error reading file '{filepath}': {str(e)}"
 
 
-def grep_search(pattern: str, directory: str = ".", extension: str = None) -> str:
+def grep_search(pattern: str, directory: str = ".", extension: str  | None = None) -> str:
     """
     Searches for a pattern (text or regex) in files within a directory.
     
