@@ -7,7 +7,7 @@ import json
 
 class Agent:
     
-    def __init__(self, client : Any ,system_prompt: str | None = None):
+    def __init__(self, client : Any ,system_prompt: str | None = None , stream : bool = True):
         
         load_dotenv()
         if not client:
@@ -22,6 +22,7 @@ class Agent:
         self.messages  : List[Message] = []
         self.max_history = 12
         self.tokens_outputed = 0
+        self.stream = stream
         
     def execute(self) -> Dict:
         """Call the LLM
@@ -47,6 +48,26 @@ class Agent:
             messages=messages,
             temperature=0.7,
             max_tokens=4096,
+            stream = True
+        )
+        full_response = ""
+        if self.stream:
+            for chunk in response:
+                if chunk.choices[0].delta.content:
+                    content = chunk.choices[0].delta.content
+                    full_response += content
+                    print(content, end="", flush=True)   
+
+            print("\n")  # Retour à la ligne à la fin
+            return {"response": full_response, "tokens": 0} 
+        
+        else:
+            response  = self.client.chat.completions.create(
+            model="deepseek/deepseek-chat",   
+            messages=messages,
+            temperature=0.7,
+            max_tokens=4096,
+            stream = False
         )
         answer : str = response.choices[0].message.content
         tokens : int = response.usage.completion_tokens
@@ -245,7 +266,7 @@ Return ONLY the summary. No introductions, no explanations, no extra text."""
                 print(f"THOUGHT ({resp["tokens"]} tokens):\n{parsed_resp['thought']}\n")
             
             if parsed_resp["type"] == "final":
-                print(f"FINAL ANSWER :\n{parsed_resp['content']}\n\nFINAL ANSWER RETURNED AFTER {step} STEPS\n")
+                print(f"FINAL ANSWER :\n{parsed_resp['content']}\n\nFINAL ANSWER RETURNED AFTER {step+1} STEPS\n")
                 return "=== END ==="
              
             elif parsed_resp["type"] == "action": 
