@@ -21,7 +21,7 @@ class Agent:
         #Let's add some memory to our agent
         self.messages  : List[Message] = []
         self.max_history = 12
-        
+        self.tokens_outputed = 0
         
     def execute(self) -> Dict:
         """Call the LLM
@@ -50,8 +50,11 @@ class Agent:
         )
         answer : str = response.choices[0].message.content
         tokens : int = response.usage.completion_tokens
-        
+        self.tokens_outputed += tokens
         return {"response": answer , "tokens": tokens}
+    
+    def get_total_tokens(self):
+        return f"The model has outputed {self.tokens_outputed} tokens since the beginning !"
     
     def summarize_history(self):
         """ Use an llm to resume the conversation""" 
