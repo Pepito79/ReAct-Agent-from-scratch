@@ -4,6 +4,14 @@ from typing import Any , Dict ,List, Callable
 from utils.utils import extract_params_types
 import re
 import json
+from BaseTools.core_tools import (
+    get_current_time,
+    calculate,
+    list_files,
+    read_file,
+    grep_search,
+    write_python_file
+)
 
 class Agent:
     
@@ -23,6 +31,15 @@ class Agent:
         self.max_history = 12
         self.tokens_outputed = 0
         self.stream = stream
+        
+
+
+        self.add_tool(get_current_time, description="Returns the current date and time in a readable format")
+        self.add_tool(calculate, description="Safely evaluates a simple mathematical expression")
+        self.add_tool(list_files, description="Lists files and folders in a given directory")
+        self.add_tool(read_file, description="Reads the full content of a text file")
+        self.add_tool(grep_search, description="Searches for a pattern or text in files on your computer")
+        self.add_tool(write_python_file, description="Creates or overwrites a Python file (sensitive action - requires confirmation)")
         
     def execute(self) -> Dict:
         """Call the LLM
@@ -209,23 +226,36 @@ Return ONLY the summary. No introductions, no explanations, no extra text."""
                 "content": final_match.group(1).strip()
             }
 
-        # Detection of the action 
+        # Detection of the action
         action_match = re.search(r'Action[:\s]*(\w+)', text, re.IGNORECASE)
         if action_match:
             tool_name = action_match.group(1).strip()
-
             input_match = re.search(r'Action Input[:\s]*(.*)', text, re.DOTALL | re.IGNORECASE)
             input_str = input_match.group(1).strip() if input_match else ""
 
             input_str = re.sub(r'^(s:|json:|input:)\s*', '', input_str, flags=re.IGNORECASE).strip()
+
             try:
-                if input_str.startswith('{') and input_str.endswith('}'):
-                    tool_input = json.loads(input_str)
-                else:
-                    tool_input = input_str
+                tool_input = json.loads(input_str) if input_str.startswith('{') else input_str
             except:
                 tool_input = input_str
 
+            # === APPROCHE A : Simple et stable avec keywords ===
+            sensitive_keywords = ["send", "email", "book", "reserve", "delete", "remove", "pay",
+                                  "purchase", "execute", "run_code", "modify", "update", "create_file"]
+
+            needs_confirmation = any(keyword in tool_name.lower() for keyword in sensitive_keywords)
+
+            if needs_confirmation:
+                return {
+                    "type": "ask_human",
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                    "action_description": f"Execute tool '{tool_name}' with parameters: {tool_input}",
+                    "thought": thought
+                }
+
+            # Action normale
             return {
                 "type": "action",
                 "thought": thought,
@@ -262,8 +292,12 @@ Return ONLY the summary. No introductions, no explanations, no extra text."""
             
             #Find the type of response
             parsed_resp= self._parse_response(response_text)
+            num_tokens = resp["tokens"]
             if parsed_resp.get("thought"):
-                print(f"THOUGHT ({resp["tokens"]} tokens):\n{parsed_resp['thought']}\n")
+                if self.stream:
+                    print(f"THOUGHT:\n{parsed_resp['thought']}\n")
+                else:
+                    print(f"THOUGHT({num_tokens} tokens):\n{parsed_resp['thought']}\n")
             
             if parsed_resp["type"] == "final":
                 print(f"FINAL ANSWER :\n{parsed_resp['content']}\n\nFINAL ANSWER RETURNED AFTER {step+1} STEPS\n")
@@ -276,10 +310,32 @@ Return ONLY the summary. No introductions, no explanations, no extra text."""
                 
                 #Let's execute the action 
                 observation = self.execute_tool(tool_name,tool_input)
-                print(f"OBSERVATION({resp["tokens"]} tokens):\n{observation}\n")  
+                if self.stream:
+                    print(f"OBSERVATION:\n{observation}\n")
+                else:
+                    print(f"OBSERVATION({resp["tokens"]} tokens):\n{observation}\n")  
                 
                 self.messages.append(Message(type=MessageType.OBSERVATION , content = f"Observation : {observation}"))
+            
+            elif parsed_resp["type"] == "ask_human":
+                tool_name = parsed_resp["tool_name"]
+                action_desc = parsed_resp.get("action_description", "Execute an action")
+                tool_input = parsed_resp.get("tool_input")
+                thought = parsed_resp.get("thought", "")
+
+                user_decision = self.ask_human_confirmation(
+                    action_description=action_desc,
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                    thought=thought
+                )
                 
+                if user_decision == "yes":
+                    observation = self.execute_tool(tool_name, tool_input)
+                else:
+                    observation = "Action cancelled by the user."
+
+                self.messages.append(Message(type=MessageType.OBSERVATION, content=observation))
             else:
                 print(f"TEXT RESPONSE:\n{parsed_resp.get('content',response_text)}")
             
@@ -287,8 +343,7 @@ Return ONLY the summary. No introductions, no explanations, no extra text."""
         return "LIMITS OF STEPS REACHED WITHOUHT FINDING THE ANSWER "
     
     def _build_system_prompt(self) -> str:
-        """Build a strict system prompt for ReAct behavior."""
-        
+        """Build a strict system prompt optimized for ReAct behavior."""
         if not self.tool_descriptions:
             return self.system_prompt
 
@@ -297,29 +352,32 @@ Return ONLY the summary. No introductions, no explanations, no extra text."""
             for tool in self.tool_descriptions
         ])
 
-        return f"""You are a ReAct agent. Your job is to solve the user's question by reasoning step by step and using tools when necessary.
+        return f"""You are an expert ReAct agent. Your job is to solve the user's request using step-by-step reasoning and the available tools.
 
-    Available tools:
-    {tools_text}
+Available tools:
+{tools_text}
 
-    You MUST strictly follow this response format:
+Response format rules (follow exactly):
 
-    Thought: [Your detailed reasoning]
-    Action: [exact tool name]
-    Action Input: [arguments only - text or JSON]
+- If you need to use a tool:
+Thought: [Your detailed reasoning]
+Action: [exact tool name]
+Action Input: [arguments only - text or JSON]
 
-    OR, when you have the final answer:
+- If you can answer the user directly:
+Thought: [Your final reasoning]
+Final Answer: [natural and complete answer]
 
-    Thought: [Your final reasoning]
-    Final Answer: [complete natural answer to the user]
+Strict rules:
+- Always start with "Thought:"
+- Never output anything before "Thought:"
+- Do not add explanations about the format
+- Be concise and precise
+- If an action could have consequences (writing files, executing code, etc.), ask for human confirmation first
 
-    Important rules:
-    - Always start with "Thought:"
-    - Never output anything before "Thought:"
-    - Do not add explanations or extra commentary
-    - Use tools only when needed
-    - Be concise and precise"""
-    
+You have the following core tools available by default:
+get_current_time, calculate, list_files, read_file, grep_search, write_python_file
+"""
     def __call__(self, message: str | None = None) -> str:
         """
         Single-turn interaction with the agent.
@@ -332,7 +390,65 @@ Return ONLY the summary. No introductions, no explanations, no extra text."""
         result = self.execute()
         self.messages.append(Message(type=MessageType.AGENT, content=result["response"]))
 
-        return result["response"]      
+        return result["response"]     
+    
+    
+    def _explain_action(self, tool_name: str, tool_input: Any, thought: str) -> str:
+        """
+        Generates a clear and honest explanation of why the agent wants to execute a sensitive action.
+        """
+        explain_prompt = f"""You are a transparent and honest ReAct agent.
+
+The user has asked you to explain why you want to execute the following action:
+
+Tool: {tool_name}
+Parameters: {tool_input}
+Your current thought: {thought}
+
+Explain clearly and honestly:
+- Why this action is necessary
+- What is its goal
+- What is the potential risk or impact
+- Why you need the user's explicit confirmation
+
+Be natural, professional, and transparent. Keep it concise."""
+
+        try:
+            response = self.client.chat.completions.create(
+                model="deepseek/deepseek-chat",
+                messages=[{"role": "user", "content": explain_prompt}],
+                temperature=0.7,
+                max_tokens=400,
+            )
+            return response.choices[0].message.content.strip()
+
+        except Exception as e:
+            return f"I wanted to use the tool '{tool_name}' because it seems necessary to progress toward your request. However, since this action may have an impact, I prefer to have your explicit confirmation."
+    
+    
+    def ask_human_confirmation(self, action_description: str, tool_name: str, tool_input: Any = None, thought: str = "") -> str: 
+        """
+        Asks the user for confirmation before executing a sensitive action.
+        """       
+        print("🛑 HUMAN CONFIRMATION NEEDED")
+        print(f"TOOL CONCERNED : {tool_name}") 
+        print(f"ACTION THAT REQUIERES THE HUMAN:\n{action_description}")
+        while True:
+            user_input = input("\nDo you want me to execute this action ? (yes/no/explain)").strip().lower()
+            
+            if user_input in ["yes","y", "o"]:
+                return "yes"
+            elif user_input in ["no", "n", "non"]:
+                return "no"
+            elif user_input in ["explain", "e"]:
+                            print("\n💡 Agent's explanation:\n")
+                            explanation = self._explain_action(tool_name, tool_input, thought)
+                            print(explanation)
+                            print("\n")
+                            continue
+            else:
+                print("Please answer with 'yes', 'no', or 'explain'.")
+        
     
     def get_tools(self):
         return self.tools
